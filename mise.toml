@@ -1,0 +1,77 @@
+[tools]
+swift = '6.3.1'
+"github:executor-cli/executor" = "0.27.0"
+
+[env]
+_.file = ".env.local"
+
+[tasks.format]
+description = "Format the code using SwiftFormat"
+run = "executor format ."
+
+[tasks.test]
+description = "Run package tests (cross-platform: works on macOS and Linux)."
+run = "swift test"
+
+[tasks.test-coverage]
+description = "Run tests with executor-generated coverage report (requires xcrun; macOS only)."
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+executor swift test --enable-code-coverage
+executor test report --report-for-type swift ./
+executor coverage swift --verbose
+'''
+
+[tasks.release]
+description = "Run semantic-release. Use --dry-run to preview without publishing."
+usage = '''
+flag "-d --dry-run" help="Preview the release without publishing (no tag, no commit, no GitHub Release)"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+flags=()
+[ "${usage_dry_run:-false}" = "true" ] && flags+=(--dry-run)
+npx -y \
+  -p semantic-release@24 \
+  -p @semantic-release/changelog@6 \
+  -p @semantic-release/git@10 \
+  semantic-release "${flags[@]}"
+'''
+
+[tasks.check_documentation]
+description = "Lint code documentation"
+run = "executor linting documentation ./Sources --reporter console"
+
+[tasks.check_code]
+description = "Lint source code"
+run = "executor linting code ./Sources --reporter console"
+
+[tasks.check_commit_title]
+description = "Lint the latest commit title against the project's convention."
+run = "executor check-ci commit-title"
+
+[tasks.build_documentations]
+description = "Build the documentation using docc"
+usage = '''
+arg <platform> help="The default platform" default="macOS" {
+    choices "iOS" "macOS"
+}
+flag "--hosting-base-path <hosting-base-path>" help="Hosting base path" default="" env="HOSTING_BASE_PATH"
+flag "--main-library-name <main-library-name>" help="The main package library" default="CascadeKit" env="MAIN_LIBRARY_NAME"
+flag "--serve" help="Start a Python HTTP server after building"
+'''
+run = '''
+#!/usr/bin/env bash
+executor xcodebuild docc\
+    --scheme "${usage_main_library_name?}"\
+    --platform "${usage_platform?}"\
+    --hosting-base-path "${usage_hosting_base_path?}"\
+    --filter-scheme "${usage_main_library_name?}"\
+    --output-path "public"\
+    --verbose
+if [[ "${usage_serve:-}" == "true" ]]; then
+    python3 -m http.server -d public
+fi
+'''

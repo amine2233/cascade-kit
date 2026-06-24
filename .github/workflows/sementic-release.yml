@@ -1,0 +1,54 @@
+name: Semantic Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Preview the release without publishing (no tag, no commit, no GitHub Release)."
+        type: boolean
+        default: true
+
+concurrency:
+  group: semantic-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+env:
+  MISE_EXPERIMENTAL: 'true'
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up mise (cached)
+        uses: jdx/mise-action@v2
+        with:
+          experimental: true
+          cache: true
+          cache_key_prefix: mise-semantic-release
+
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            mise run release --dry-run
+          else
+            mise run release
+          fi

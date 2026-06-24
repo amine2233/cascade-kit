@@ -48,7 +48,7 @@ jobs:
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           if [[ "${{ inputs.dry_run }}" == "true" ]]; then
-            mise run release --dry-run
+            mise run release --dry-run --write-change-log
           else
-            mise run release
+            mise run release --write-change-log
           fi

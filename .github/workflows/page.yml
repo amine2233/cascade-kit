@@ -20,10 +20,8 @@ jobs:
       contents: read
       pages: write
       id-token: write
-    uses: amine2233/ci-shared/.github/workflows/pages.yml@1.0.0
+    uses: amine2233/ci-shared/.github/workflows/pages.yml@1.0
     with:
       main-library-name: CascadeKit
-      hosting-base-path: cascade-kit
-      # macos-latest still ships an Xcode too old for swift-tools-version 6.3;
-      # pin to macOS 26 (Xcode 26.x) which can build the DocC archive.
-      macos-runner: macos-26
+      hosting-base-path: ${{ github.event.repository.name }}
+      macos-runner: macos-latest

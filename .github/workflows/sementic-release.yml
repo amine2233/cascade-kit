@@ -21,7 +21,7 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-    uses: amine2233/ci-shared/.github/workflows/semantic-release.yml@main
+    uses: amine2233/ci-shared/.github/workflows/semantic-release.yml@1.0.0
     with:
       release-args: ${{ inputs.dry_run && '--dry-run --write-change-log' || '--write-change-log' }}
     secrets: inherit

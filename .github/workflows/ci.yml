@@ -13,7 +13,7 @@ on:
 
 jobs:
   ci:
-    uses: amine2233/ci-shared/.github/workflows/ci.yml@main
+    uses: amine2233/ci-shared/.github/workflows/ci.yml@1.0.0
     with:
       # Tests run via `swift test` (mise's Swift toolchain), on macOS + Linux.
       enable-macos: true

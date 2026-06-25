@@ -20,7 +20,7 @@ jobs:
       contents: read
       pages: write
       id-token: write
-    uses: amine2233/ci-shared/.github/workflows/pages.yml@main
+    uses: amine2233/ci-shared/.github/workflows/pages.yml@1.0.0
     with:
       main-library-name: CascadeKit
       hosting-base-path: cascade-kit

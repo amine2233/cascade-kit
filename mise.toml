@@ -84,11 +84,10 @@ flag "--serve" help="Start a Python HTTP server after building"
 '''
 run = '''
 #!/usr/bin/env bash
+set -euo pipefail
 executor xcodebuild docc\
-    --scheme "${usage_main_library_name?}"\
     --platform "${usage_platform?}"\
     --hosting-base-path "${usage_hosting_base_path?}"\
-    --filter-scheme "${usage_main_library_name?}"\
     --output-path "public"\
     --verbose
 if [[ "${usage_serve:-}" == "true" ]]; then

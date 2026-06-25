@@ -15,7 +15,7 @@ on:
 jobs:
   docs:
     # Deploy on manual dispatch, or only when the triggering CI run succeeded.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_sha == github.sha) }}
     permissions:
       contents: read
       pages: write

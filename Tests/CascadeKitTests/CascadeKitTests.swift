@@ -626,3 +626,35 @@ struct SingletonLifecycleTests {
         }
     }
 }
+
+private final class MainActorBox {
+    var value = 0
+}
+
+@Suite
+struct IsolationTests {
+    @MainActor
+    @Test
+    func mainActorCallerUsesNonSendableState() async {
+        let box = MainActorBox()
+        var onMain: [Bool] = []
+        await withDependencies { $0.greeter = NamedGreeter(name: "x") } operation: {
+            box.value += 1
+            onMain.append(Thread.isMainThread)
+        }
+        await withTestDependencies { $0.greeter = NamedGreeter(name: "y") } operation: {
+            box.value += 1
+            onMain.append(Thread.isMainThread)
+        }
+        #expect(box.value == 2)
+        #expect(onMain == [true, true])
+    }
+
+    @Test
+    func actorlessCallerStillCompiles() async {
+        let result = await withDependencies { $0.greeter = NamedGreeter(name: "z") } operation: {
+            Feature().run()
+        }
+        #expect(result == "z")
+    }
+}

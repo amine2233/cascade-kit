@@ -81,6 +81,19 @@ public final class ServiceStorage: Sendable {
         items.withLock { ($0[ObjectIdentifier(key)] as? StoredValue<Key.Value>)?.value }
     }
 
+    /// Returns the value under `key`, inserting `make()` atomically if absent.
+    func value<Key: StorageKey>(_ key: Key.Type, orInsert make: () -> Key.Value) -> Key.Value {
+        let id = ObjectIdentifier(key)
+        return items.withLock { items in
+            if let existing = (items[id] as? StoredValue<Key.Value>)?.value {
+                return existing
+            }
+            let created = make()
+            items[id] = StoredValue(value: created, onShutdown: nil)
+            return created
+        }
+    }
+
     /// Stores `value` under `key`, or removes it when `value` is `nil`.
     ///
     /// - Parameter onShutdown: Optional cleanup run when the value is removed
@@ -379,6 +392,28 @@ public struct Factory<Service: Sendable>: Sendable {
 
     let scope: Scope
     let build: @Sendable (any Container) -> Service
+    let onShutdown: (@Sendable (Service) -> Void)?
+}
+
+/// Builds a singleton once: the first caller holds the cell's lock while the
+/// factory runs, later callers wait and then read the same instance.
+private final class OnceCell<Value: Sendable>: Sendable {
+    private let state = Lock<Value?>(nil)
+
+    func value(build: () -> Value) -> Value {
+        state.withLock { value in
+            if let value {
+                return value
+            }
+            let created = build()
+            value = created
+            return created
+        }
+    }
+}
+
+private struct CellKey<K: StorageKey>: StorageKey {
+    typealias Value = OnceCell<K.Value>
 }
 
 /// Two distinct generic specialisations give each `StorageKey` two slots —
@@ -412,9 +447,10 @@ extension Container {
     public func register<K: StorageKey>(
         _ key: K.Type,
         scope: Factory<K.Value>.Scope = .singleton,
+        onShutdown: (@Sendable (K.Value) -> Void)? = nil,
         _ build: @escaping @Sendable (any Container) -> K.Value
     ) {
-        storage.set(FactoryKey<K>.self, to: Factory(scope: scope, build: build))
+        storage.set(FactoryKey<K>.self, to: Factory(scope: scope, build: build, onShutdown: onShutdown))
     }
 
     /// Resolves a service if one is registered here or on a parent, running its
@@ -428,9 +464,9 @@ extension Container {
     /// instance; transient factories see the caller's values.
     ///
     /// - Note: Factories run **outside** the storage lock, so a factory that
-    ///   recursively `make`s its own dependencies cannot deadlock. The lazy
-    ///   singleton cache uses a benign last-write-wins race under concurrent
-    ///   first-touch; warm singletons up single-threaded at boot to avoid it.
+    ///   recursively `make`s a *different* key cannot deadlock. A singleton is
+    ///   built exactly once even under concurrent first use; concurrent callers
+    ///   wait for the first build. Its `onShutdown` hook runs on `shutdown()`.
     public func resolveIfRegistered<K: StorageKey>(_ key: K.Type) -> K.Value? {
         if let factory = storage.get(FactoryKey<K>.self) {
             switch factory.scope {
@@ -440,28 +476,38 @@ extension Container {
                 if let cached = storage.get(CacheKey<K>.self) {
                     return cached
                 }
+                ensureNotResolving(key)
                 var root = DependencyValues()
                 root.container = self
-                let instance = build(key, factory, values: root) // built without the lock
-                storage.set(CacheKey<K>.self, to: instance)
-                return instance
+                let cell = storage.value(CellKey<K>.self) { OnceCell() }
+                return cell.value {
+                    let instance = build(key, factory, values: root) // built without the storage lock
+                    storage.set(CacheKey<K>.self, to: instance, onShutdown: factory.onShutdown)
+                    return instance
+                }
             }
         }
         return parent?.resolveIfRegistered(key)
     }
 
-    /// Runs `factory` with `values` bound, trapping if this (container, key)
-    /// is already being built on the current task.
+    /// Traps if this (container, key) is already being built on the current
+    /// task. Checked before taking a singleton's cell lock, which would
+    /// otherwise deadlock on re-entry.
+    private func ensureNotResolving<K: StorageKey>(_ key: K.Type) {
+        let id = ResolutionID(container: ObjectIdentifier(self), key: ObjectIdentifier(key))
+        guard !ResolutionStack.active.contains(id) else {
+            fatalError("Recursive resolution of \(K.self).")
+        }
+    }
+
+    /// Runs `factory` with `values` bound.
     private func build<K: StorageKey>(
         _ key: K.Type,
         _ factory: Factory<K.Value>,
         values: DependencyValues
     ) -> K.Value {
+        ensureNotResolving(key)
         let id = ResolutionID(container: ObjectIdentifier(self), key: ObjectIdentifier(key))
-        guard !ResolutionStack.active.contains(id) else {
-            fatalError("Recursive resolution of \(K.self).")
-        }
-
         return ResolutionStack.$active.withValue(ResolutionStack.active.union([id])) {
             DependencyValues.$current.withValue(values) {
                 factory.build(self)

@@ -562,3 +562,67 @@ struct ContainerDispatchTests {
         }
     }
 }
+
+@Suite
+struct SingletonLifecycleTests {
+    private enum PoolKey: StorageKey { typealias Value = Connection }
+
+    @Test
+    func concurrentFirstUseBuildsOnce() async {
+        let builds = Counter()
+        let app = AppScope()
+        app.register(PoolKey.self) { _ in
+            builds.increment()
+            Thread.sleep(forTimeInterval: 0.02)
+            return Connection()
+        }
+        let ids = await withTaskGroup(of: UUID.self) { group in
+            for _ in 0..<32 {
+                group.addTask { app.make(PoolKey.self).id }
+            }
+            return await group.reduce(into: Set<UUID>()) { $0.insert($1) }
+        }
+        #expect(builds.value == 1)
+        #expect(ids.count == 1)
+    }
+
+    @Test
+    func shutdownRunsRegisteredHookOnce() {
+        let closed = Counter()
+        let app = AppScope()
+        app.register(PoolKey.self, onShutdown: { _ in closed.increment() }) { _ in Connection() }
+        _ = app.make(PoolKey.self)
+        _ = app.make(PoolKey.self)
+        app.shutdown()
+        app.shutdown()
+        #expect(closed.value == 1)
+    }
+
+    @Test
+    func unbuiltSingletonHasNoShutdown() {
+        let closed = Counter()
+        let app = AppScope()
+        app.register(PoolKey.self, onShutdown: { _ in closed.increment() }) { _ in Connection() }
+        app.shutdown()
+        #expect(closed.value == 0)
+    }
+
+    @Test
+    func transientNeverShutsDown() {
+        let closed = Counter()
+        let app = AppScope()
+        app.register(PoolKey.self, scope: .transient, onShutdown: { _ in closed.increment() }) { _ in Connection() }
+        _ = app.make(PoolKey.self)
+        app.shutdown()
+        #expect(closed.value == 0)
+    }
+
+    @Test
+    func singletonReentryStillTraps() async {
+        await #expect(processExitsWith: .failure) {
+            let app = AppScope()
+            app.register(PoolKey.self) { c in c.make(PoolKey.self) }
+            _ = app.make(PoolKey.self)
+        }
+    }
+}

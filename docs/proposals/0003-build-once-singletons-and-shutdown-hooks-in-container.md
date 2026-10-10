@@ -42,7 +42,7 @@ We propose making singleton construction build-once under concurrency and adding
 **Non-goals**
 
 - **NG1** — Async factories.
-- **NG2** — General cycle detection. Exception: re-entry of the same key on the same task MUST trap (needed by 0001, whose bridge makes it easy to hit).
+- **NG2** — General cycle detection. Same-key re-entry on one task already traps (shipped with 0001, #4); this proposal keeps that check ahead of the singleton cell lock.
 
 ## Proposal
 

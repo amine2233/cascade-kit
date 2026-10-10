@@ -773,3 +773,57 @@ private enum SelfReferencingKey: DependencyKey {
         DependencyValues.current[SelfReferencingKey.self]
     }
 }
+
+@Suite
+struct PropagationTests {
+    private func overridden<R>(_ operation: () async -> R) async -> R {
+        await withTestDependencies {
+            $0.greeter = NamedGreeter(name: "override")
+        } operation: {
+            await operation()
+        }
+    }
+
+    @Test
+    func asyncLetChildInherits() async {
+        let result: String = await overridden {
+            async let child = Feature().run()
+            return await child
+        }
+        #expect(result == "override")
+    }
+
+    @Test
+    func taskGroupChildInherits() async {
+        let result: String = await overridden {
+            await withTaskGroup(of: String.self) { group in
+                group.addTask { Feature().run() }
+                return await group.reduce(into: "") { $0 += $1 }
+            }
+        }
+        #expect(result == "override")
+    }
+
+    @Test
+    func dispatchQueueDoesNotInherit() async {
+        let result: String = await overridden {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global().async {
+                    continuation.resume(returning: Feature().run())
+                }
+            }
+        }
+        #expect(result == "live")
+    }
+
+    @Test
+    func capturedValuesRestoreOverrideInDetachedTask() async {
+        let result: String = await overridden {
+            let values = DependencyValues.current
+            return await Task.detached {
+                DependencyValues.$current.withValue(values) { Feature().run() }
+            }.value
+        }
+        #expect(result == "override")
+    }
+}

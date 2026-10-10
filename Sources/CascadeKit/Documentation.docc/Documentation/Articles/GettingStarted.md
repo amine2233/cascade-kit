@@ -108,6 +108,25 @@ app.register(DatabaseKey.self) { _ in
 let db = app.make(DatabaseKey.self)
 ```
 
+## Where overrides propagate
+`DependencyValues.current` is a task-local, so overrides follow the task tree.
+
+| API | Overrides propagate? |
+| --- | --- |
+| `async let`, child task, `TaskGroup` | Yes |
+| `Task { … }` | Yes |
+| `Task.detached { … }` | No |
+| `DispatchQueue.async`, callbacks | No |
+
+Where they do not propagate, capture the values and bind them again:
+
+```swift
+let values = DependencyValues.current
+Task.detached {
+    await DependencyValues.$current.withValue(values) { await effect() }
+}
+```
+
 ## Building documentation locally
 This repository includes a `mise` task that runs DocC:
 

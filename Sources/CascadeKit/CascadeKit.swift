@@ -1,33 +1,4 @@
-import Foundation
-
-// =============================================================================
-// MARK: - Lock
-
-// =============================================================================
-
-/// A minimal mutex wrapping `NSLock`.
-///
-/// Used instead of `Synchronization.Mutex` so the library back-deploys to all
-/// supported OS versions (`Mutex` requires iOS 18 / macOS 15). Swap to `Mutex`
-/// if your deployment target allows it.
-final class Lock<State>: @unchecked Sendable {
-    private let nslock = NSLock()
-    private var state: State
-
-    init(_ initial: State) {
-        self.state = initial
-    }
-
-    /// Executes `body` while holding the lock.
-    ///
-    /// - Important: Never perform work that re-enters this same lock from
-    ///   inside `body` — `NSLock` is non-recursive and will deadlock.
-    func withLock<R>(_ body: (inout State) throws -> R) rethrows -> R {
-        nslock.lock()
-        defer { nslock.unlock() }
-        return try body(&state)
-    }
-}
+import Synchronization
 
 // =============================================================================
 // MARK: - Type-keyed ServiceStorage (the shared primitive)
@@ -65,11 +36,9 @@ private struct StoredValue<T: Sendable>: AnyStorageValue {
 /// registry uses a separate, *value-typed* store — see `DependencyValues` —
 /// because it needs copy semantics for scoped overriding.)
 public final class ServiceStorage: Sendable {
-    private let items: Lock<[ObjectIdentifier: any AnyStorageValue]>
+    private let items = Mutex<[ObjectIdentifier: any AnyStorageValue]>([:])
 
-    public init() {
-        self.items = Lock([:])
-    }
+    public init() {}
 
     /// Returns whether a value is registered for `key`.
     public func contains<Key: StorageKey>(_ key: Key.Type) -> Bool {
@@ -186,7 +155,7 @@ private struct DefaultCacheKey: Hashable {
 
 /// Lazily-built default values, one build-once cell per (key, context).
 private final class DefaultCells: Sendable {
-    private let cells = Lock<[DefaultCacheKey: any Sendable]>([:])
+    private let cells = Mutex<[DefaultCacheKey: any Sendable]>([:])
 
     func value<V: Sendable>(for key: DefaultCacheKey, build: () -> V) -> V {
         let cell = cells.withLock { cells -> OnceCell<V> in
@@ -451,7 +420,7 @@ public struct Factory<Service: Sendable>: Sendable {
 /// Builds a singleton once: the first caller holds the cell's lock while the
 /// factory runs, later callers wait and then read the same instance.
 private final class OnceCell<Value: Sendable>: Sendable {
-    private let state = Lock<Value?>(nil)
+    private let state = Mutex<Value?>(nil)
 
     func value(build: () -> Value) -> Value {
         state.withLock { value in

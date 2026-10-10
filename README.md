@@ -4,7 +4,6 @@ CascadeKit is a small Swift package that provides lightweight, concurrency-safe
 primitives and a simple dependency/DI registry useful for apps and libraries.
 
 Key features
-- `Lock`: a minimal mutex wrapper around `NSLock` for safe state mutation.
 - `ServiceStorage`: type-keyed, thread-safe storage with shutdown hooks.
 - `DependencyKey` / `DependencyValues` / `@Dependency`: a simple dependency
   registry and property wrapper for resolving dependencies in different

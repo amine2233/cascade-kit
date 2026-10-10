@@ -22,25 +22,6 @@ import CascadeKit
 
 ## Basic primitives
 
-### `Lock`
-A thin mutex wrapper around `NSLock` for protecting mutable state.
-
-```swift
-final class Counter {
-    private let lock = Lock(0)
-
-    func increment() {
-        lock.withLock { count in
-            count += 1
-        }
-    }
-
-    func value() -> Int {
-        lock.withLock { $0 }
-    }
-}
-```
-
 ### `ServiceStorage`
 Type-keyed thread-safe storage. Useful for storing singleton resources or
 ad-hoc values keyed by type.

@@ -79,8 +79,8 @@ private final class Repo: Sendable {
     }
 }
 
-private enum ConnectionKey: ServiceKey { typealias Value = Connection }
-private enum RepoKey: ServiceKey { typealias Value = Repo }
+private enum ConnectionKey: StorageKey { typealias Value = Connection }
+private enum RepoKey: StorageKey { typealias Value = Repo }
 
 // =============================================================================
 // MARK: - Storage (type-keyed primitive)
@@ -406,5 +406,102 @@ struct ContainerTests {
         app.storage.set(IntKey.self, to: 1, onShutdown: { _ in counter.increment() })
         app.shutdown()
         #expect(counter.value == 1)
+    }
+}
+
+@Suite
+struct ContainerBridgeTests {
+    private enum PoolKey: DependencyKey {
+        static let liveValue = Connection()
+    }
+
+    @Test
+    func dependencyResolvesContainerRegistration() {
+        let app = Application()
+        let registered = Connection()
+        app.register(PoolKey.self) { _ in registered }
+        let value = withDependencies { $0.container = app } operation: {
+            DependencyValues.current[PoolKey.self]
+        }
+        #expect(value === registered)
+        #expect(value !== PoolKey.liveValue)
+    }
+
+    @Test
+    func overrideBeatsContainer() {
+        let app = Application()
+        app.register(PoolKey.self) { _ in Connection() }
+        let override = Connection()
+        let value = withDependencies {
+            $0.container = app
+            $0[PoolKey.self] = override
+        } operation: {
+            DependencyValues.current[PoolKey.self]
+        }
+        #expect(value === override)
+    }
+
+    @Test
+    func unregisteredKeyFallsBackToDefault() {
+        let app = Application()
+        let value = withDependencies { $0.container = app } operation: {
+            DependencyValues.current[PoolKey.self]
+        }
+        #expect(value === PoolKey.liveValue)
+    }
+
+    @Test
+    func requestBoundContainerSeesApplicationSingleton() {
+        let app = Application()
+        app.register(PoolKey.self) { _ in Connection() }
+        let request = Request(application: app)
+        let value = withDependencies { $0.container = request } operation: {
+            DependencyValues.current[PoolKey.self]
+        }
+        #expect(value === app.make(PoolKey.self))
+    }
+
+    @Test
+    func contextIgnoresInheritedContainer() {
+        let app = Application()
+        app.register(GreeterKey.self) { _ in NamedGreeter(name: "container") }
+        let result = withDependencies { $0.container = app } operation: {
+            withTestDependencies { Feature().run() }
+        }
+        #expect(result == "test")
+    }
+
+    @Test
+    func contextUsesContainerBoundInside() {
+        let app = Application()
+        app.register(GreeterKey.self) { _ in NamedGreeter(name: "container") }
+        let result = withTestDependencies { $0.container = app } operation: { Feature().run() }
+        #expect(result == "container")
+    }
+
+    @Test
+    func singletonFactoryDoesNotCaptureCallerOverrides() {
+        let app = Application()
+        app.register(RepoKey.self) { _ in
+            Repo(conn: DependencyValues.current[PoolKey.self])
+        }
+        let override = Connection()
+        let repo = withDependencies { $0[PoolKey.self] = override } operation: {
+            app.make(RepoKey.self)
+        }
+        #expect(repo.conn !== override)
+    }
+
+    @Test
+    func transientFactorySeesCallerOverrides() {
+        let app = Application()
+        app.register(RepoKey.self, scope: .transient) { _ in
+            Repo(conn: DependencyValues.current[PoolKey.self])
+        }
+        let override = Connection()
+        let repo = withDependencies { $0[PoolKey.self] = override } operation: {
+            app.make(RepoKey.self)
+        }
+        #expect(repo.conn === override)
     }
 }

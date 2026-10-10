@@ -26,7 +26,7 @@ We propose adding `isolation: isolated (any Actor)? = #isolation` to the async `
 
 ## Context and problem
 
-The async overloads at `CascadeKit.swift:292` and `:312` are nonisolated, so on Swift 6 the operation leaves the caller's actor. A `@MainActor` view model capturing main-actor state in `operation` is expected to fail to compile or to need `@Sendable` workarounds (reproduction and compiler error to be added by the 30-minute spike before approval, to verify). The platform `TaskLocal.withValue` already accepts an `isolation:` parameter.
+The async overloads at `CascadeKit.swift:292` and `:312` are nonisolated, so on Swift 6 the operation leaves the caller's actor. A `@MainActor` view model capturing main-actor state in `operation` is expected to fail to compile or to need `@Sendable` workarounds (spike 2026-10-10: not reproduced on Swift 6.4 / Xcode 27, where a `@MainActor` caller with non-Sendable state compiles and the operation stays on the main thread; Swift 6.3.1 could not be tested against this SDK, to verify). The platform `TaskLocal.withValue` already accepts an `isolation:` parameter.
 
 ## Goals and non-goals
 

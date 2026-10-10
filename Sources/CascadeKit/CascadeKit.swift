@@ -308,17 +308,16 @@ public func withDependencies<R>(
     }
 }
 
-/// Async overload of `withDependencies`.
+/// Async overload of `withDependencies`. `operation` runs on the caller's actor.
 @discardableResult
 public func withDependencies<R>(
+    isolation: isolated (any Actor)? = #isolation,
     _ mutate: (inout DependencyValues) -> Void,
     operation: () async throws -> R
 ) async rethrows -> R {
     var values = DependencyValues.current
     mutate(&values)
-    return try await DependencyValues.$current.withValue(values) {
-        try await operation()
-    }
+    return try await DependencyValues.$current.withValue(values, operation: operation, isolation: isolation)
 }
 
 /// Test-focused sugar: switches the context to `.test` (so unoverridden keys
@@ -332,10 +331,11 @@ public func withDependencies<R>(
 ///     }
 @discardableResult
 public func withTestDependencies<R>(
+    isolation: isolated (any Actor)? = #isolation,
     _ mutate: (inout DependencyValues) -> Void = { _ in },
     operation: () async throws -> R
 ) async rethrows -> R {
-    try await withDependencies {
+    try await withDependencies(isolation: isolation) {
         $0.context = .test
         $0.container = nil
         mutate(&$0)

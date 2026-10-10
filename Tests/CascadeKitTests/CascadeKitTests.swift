@@ -577,7 +577,7 @@ struct SingletonLifecycleTests {
             return Connection()
         }
         let ids = await withTaskGroup(of: UUID.self) { group in
-            for _ in 0..<32 {
+            for _ in 0 ..< 32 {
                 group.addTask { app.make(PoolKey.self).id }
             }
             return await group.reduce(into: Set<UUID>()) { $0.insert($1) }
@@ -611,7 +611,10 @@ struct SingletonLifecycleTests {
     func transientNeverShutsDown() {
         let closed = Counter()
         let app = AppScope()
-        app.register(PoolKey.self, scope: .transient, onShutdown: { _ in closed.increment() }) { _ in Connection() }
+        app
+            .register(PoolKey.self, scope: .transient, onShutdown: { _ in closed.increment() }) { _ in
+                Connection()
+            }
         _ = app.make(PoolKey.self)
         app.shutdown()
         #expect(closed.value == 0)

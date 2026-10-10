@@ -20,6 +20,8 @@ superseded-by: ""
 > Format: mini (triage score 2/6 — C1 behaviour contract, C5 options).
 > The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be interpreted as described in RFC 2119.
 
+> Implementation note (2026-10-10): the reviewer's split was not yet decided, so only the non-breaking parts are implemented: the per-scope test cache (G2) and the build-once `liveValue` (G3), with a re-entry trap. The breaking loud-failure change (G1) is deferred to its own proposal; `testValue` still defaults to `liveValue`.
+
 ## Summary
 
 We propose three changes to default-value resolution: unoverridden `testValue` fails loudly instead of falling back to `liveValue`; `testValue` and `previewValue` are cached once per `withTestDependencies` scope; and `liveValue` is built exactly once. Unlike today's silent fallback, a test that forgets an override fails instead of hitting the real service, at the cost of requiring a `testValue` for every key used in tests.

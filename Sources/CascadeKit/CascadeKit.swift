@@ -180,7 +180,24 @@ private struct DefaultCacheKey: Hashable {
     let context: DependencyContext
 }
 
-private let _defaultCache = Lock<[DefaultCacheKey: any Sendable]>([:])
+/// Lazily-built default values, one build-once cell per (key, context).
+private final class DefaultCells: Sendable {
+    private let cells = Lock<[DefaultCacheKey: any Sendable]>([:])
+
+    func value<V: Sendable>(for key: DefaultCacheKey, build: () -> V) -> V {
+        let cell = cells.withLock { cells -> OnceCell<V> in
+            if let existing = cells[key] as? OnceCell<V> {
+                return existing
+            }
+            let created = OnceCell<V>()
+            cells[key] = created
+            return created
+        }
+        return cell.value(build: build)
+    }
+}
+
+private let _defaultCells = DefaultCells()
 
 /// The current set of dependency values, propagated implicitly down the task
 /// tree (this is `EnvironmentValues` for non-SwiftUI async code).
@@ -189,7 +206,9 @@ private let _defaultCache = Lock<[DefaultCacheKey: any Sendable]>([:])
 ///   1. An explicit override stored via `withDependencies`.
 ///   2. A registration on the bound `container`, if any.
 ///   3. Otherwise the context default (`liveValue`/`previewValue`/`testValue`),
-///      cached once for `.live`/`.preview`, recomputed fresh for `.test`.
+///      built once for `.live`/`.preview` per process, and once per
+///      `withTestDependencies` scope for `.test` (fresh on each read when
+///      `context` is set to `.test` without that scope).
 public struct DependencyValues: Sendable {
     /// The values in effect for the current task. Bound by `withDependencies`.
     @TaskLocal public static var current = DependencyValues()
@@ -204,7 +223,18 @@ public struct DependencyValues: Sendable {
     /// Explicit overrides, keyed on the dependency key's metatype.
     private var storage: [ObjectIdentifier: any Sendable] = [:]
 
+    /// The `testValue` cache of the enclosing `withTestDependencies` scope.
+    private var testDefaults: DefaultCells?
+
     public init() {}
+
+    /// Starts a new `.test` scope: unoverridden `testValue`s are built once per
+    /// scope, so a stateful stub keeps its state across reads.
+    mutating func beginTestScope() {
+        context = .test
+        container = nil
+        testDefaults = DefaultCells()
+    }
 
     /// Reads or writes the value for `key`.
     ///
@@ -219,19 +249,33 @@ public struct DependencyValues: Sendable {
                 return found
             }
             // Nothing registered: fall back to the context default.
+            let cells: DefaultCells
             if context == .test {
-                // Tests get a fresh default each time (no cross-test caching).
-                return Self.makeDefault(key, context)
+                guard let testDefaults else {
+                    return Self.makeDefault(key, context)
+                }
+
+                cells = testDefaults
+            } else {
+                cells = _defaultCells
             }
+            // Re-entry is checked before the cell lock is taken, which would
+            // otherwise deadlock on a default that resolves its own key.
+            let id = ResolutionID(
+                container: ObjectIdentifier(DependencyValues.self),
+                key: ObjectIdentifier(key)
+            )
+            guard !ResolutionStack.active.contains(id) else {
+                fatalError("Recursive resolution of \(K.self).")
+            }
+
             let cacheKey = DefaultCacheKey(id: ObjectIdentifier(key), context: context)
-            if let cached = _defaultCache.withLock({ $0[cacheKey] as? K.Value }) {
-                return cached
+            let context = context
+            return cells.value(for: cacheKey) {
+                ResolutionStack.$active.withValue(ResolutionStack.active.union([id])) {
+                    Self.makeDefault(key, context) // built without the dictionary lock
+                }
             }
-            // Build OUTSIDE the lock: a `liveValue` may resolve other
-            // dependencies, which would otherwise re-enter this lock.
-            let made = Self.makeDefault(key, context)
-            _defaultCache.withLock { $0[cacheKey] = made }
-            return made
         }
         set {
             storage[ObjectIdentifier(key)] = newValue
@@ -336,8 +380,7 @@ public func withTestDependencies<R>(
     operation: () async throws -> R
 ) async rethrows -> R {
     try await withDependencies(isolation: isolation) {
-        $0.context = .test
-        $0.container = nil
+        $0.beginTestScope()
         mutate(&$0)
     } operation: {
         try await operation()
@@ -351,8 +394,7 @@ public func withTestDependencies<R>(
     operation: () throws -> R
 ) rethrows -> R {
     try withDependencies {
-        $0.context = .test
-        $0.container = nil
+        $0.beginTestScope()
         mutate(&$0)
     } operation: {
         try operation()

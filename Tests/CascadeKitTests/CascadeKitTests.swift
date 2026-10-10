@@ -692,3 +692,84 @@ struct ResolveTests {
         }
     }
 }
+
+private final class SpyService: Sendable {
+    let id = UUID()
+}
+
+private enum SpyKey: DependencyKey {
+    static let liveValue = SpyService()
+    static var testValue: SpyService {
+        SpyService()
+    }
+}
+
+private enum SlowLiveKey: DependencyKey {
+    static let builds = Counter()
+    static var liveValue: SpyService {
+        builds.increment()
+        Thread.sleep(forTimeInterval: 0.02)
+        return SpyService()
+    }
+}
+
+@Suite
+struct DefaultCacheTests {
+    @Test
+    func valueIsStableWithinScope() {
+        withTestDependencies {
+            let first = DependencyValues.current[SpyKey.self]
+            let second = DependencyValues.current[SpyKey.self]
+            #expect(first === second)
+        }
+    }
+
+    @Test
+    func valueIsFreshPerScope() {
+        let a = withTestDependencies { DependencyValues.current[SpyKey.self] }
+        let b = withTestDependencies { DependencyValues.current[SpyKey.self] }
+        #expect(a !== b)
+    }
+
+    @Test
+    func nestedPlainScopeSharesTestCache() {
+        withTestDependencies {
+            let outer = DependencyValues.current[SpyKey.self]
+            withDependencies { _ in } operation: {
+                #expect(DependencyValues.current[SpyKey.self] === outer)
+            }
+        }
+    }
+
+    @Test
+    func contextTestWithoutScopeStaysFresh() {
+        withDependencies { $0.context = .test } operation: {
+            #expect(DependencyValues.current[SpyKey.self] !== DependencyValues.current[SpyKey.self])
+        }
+    }
+
+    @Test
+    func liveValueBuiltOnceUnderConcurrency() async {
+        let ids = await withTaskGroup(of: UUID.self) { group in
+            for _ in 0 ..< 32 {
+                group.addTask { DependencyValues.current[SlowLiveKey.self].id }
+            }
+            return await group.reduce(into: Set<UUID>()) { $0.insert($1) }
+        }
+        #expect(SlowLiveKey.builds.value == 1)
+        #expect(ids.count == 1)
+    }
+
+    @Test
+    func recursiveDefaultTraps() async {
+        await #expect(processExitsWith: .failure) {
+            _ = DependencyValues.current[SelfReferencingKey.self]
+        }
+    }
+}
+
+private enum SelfReferencingKey: DependencyKey {
+    static var liveValue: SpyService {
+        DependencyValues.current[SelfReferencingKey.self]
+    }
+}

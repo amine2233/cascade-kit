@@ -61,7 +61,7 @@ private struct Feature {
     }
 }
 
-// --- Plain StorageKeys for the low-level Storage tests -----------------------
+// --- Plain StorageKeys for the low-level ServiceStorage tests -----------------------
 
 private enum IntKey: StorageKey { typealias Value = Int }
 private enum StringKey: StorageKey { typealias Value = String }
@@ -83,7 +83,7 @@ private enum ConnectionKey: StorageKey { typealias Value = Connection }
 private enum RepoKey: StorageKey { typealias Value = Repo }
 
 // =============================================================================
-// MARK: - Storage (type-keyed primitive)
+// MARK: - ServiceStorage (type-keyed primitive)
 
 // =============================================================================
 
@@ -91,20 +91,20 @@ private enum RepoKey: StorageKey { typealias Value = Repo }
 struct StorageTests {
     @Test
     func setAndGetRoundTrips() {
-        let storage = Storage()
+        let storage = ServiceStorage()
         storage.set(IntKey.self, to: 42)
         #expect(storage.get(IntKey.self) == 42)
     }
 
     @Test
     func absentKeyReturnsNil() {
-        let storage = Storage()
+        let storage = ServiceStorage()
         #expect(storage.get(IntKey.self) == nil)
     }
 
     @Test
     func containsReflectsPresence() {
-        let storage = Storage()
+        let storage = ServiceStorage()
         #expect(storage.contains(IntKey.self) == false)
         storage.set(IntKey.self, to: 1)
         #expect(storage.contains(IntKey.self) == true)
@@ -112,7 +112,7 @@ struct StorageTests {
 
     @Test
     func overwriteReplacesValue() {
-        let storage = Storage()
+        let storage = ServiceStorage()
         storage.set(IntKey.self, to: 1)
         storage.set(IntKey.self, to: 2)
         #expect(storage.get(IntKey.self) == 2)
@@ -120,7 +120,7 @@ struct StorageTests {
 
     @Test
     func settingNilRemovesValue() {
-        let storage = Storage()
+        let storage = ServiceStorage()
         storage.set(IntKey.self, to: 1)
         storage.set(IntKey.self, to: nil)
         #expect(storage.get(IntKey.self) == nil)
@@ -129,7 +129,7 @@ struct StorageTests {
 
     @Test
     func distinctKeysAreIndependent() {
-        let storage = Storage()
+        let storage = ServiceStorage()
         storage.set(IntKey.self, to: 7)
         storage.set(StringKey.self, to: "hi")
         #expect(storage.get(IntKey.self) == 7)
@@ -139,7 +139,7 @@ struct StorageTests {
     @Test
     func onShutdownFiresWhenRemoved() {
         let counter = Counter()
-        let storage = Storage()
+        let storage = ServiceStorage()
         storage.set(IntKey.self, to: 1, onShutdown: { _ in counter.increment() })
         #expect(counter.value == 0)
         storage.set(IntKey.self, to: nil)
@@ -149,7 +149,7 @@ struct StorageTests {
     @Test
     func onShutdownFiresWhenOverwritten() {
         let counter = Counter()
-        let storage = Storage()
+        let storage = ServiceStorage()
         storage.set(IntKey.self, to: 1, onShutdown: { _ in counter.increment() })
         storage.set(IntKey.self, to: 2) // evicts the previous value
         #expect(counter.value == 1)
@@ -158,7 +158,7 @@ struct StorageTests {
     @Test
     func shutdownAllFiresEveryHookAndClears() {
         let counter = Counter()
-        let storage = Storage()
+        let storage = ServiceStorage()
         storage.set(IntKey.self, to: 1, onShutdown: { _ in counter.increment() })
         storage.set(StringKey.self, to: "x", onShutdown: { _ in counter.increment() })
         storage.shutdownAll()
@@ -354,30 +354,30 @@ struct TaskIsolationTests {
 struct ContainerTests {
     @Test
     func singletonReturnsSameInstance() {
-        let app = Application()
+        let app = AppScope()
         app.register(ConnectionKey.self) { _ in Connection() }
         #expect(app.make(ConnectionKey.self) === app.make(ConnectionKey.self))
     }
 
     @Test
     func transientReturnsFreshInstances() {
-        let app = Application()
+        let app = AppScope()
         app.register(ConnectionKey.self, scope: .transient) { _ in Connection() }
         #expect(app.make(ConnectionKey.self) !== app.make(ConnectionKey.self))
     }
 
     @Test
     func requestFallsThroughToApplication() {
-        let app = Application()
+        let app = AppScope()
         app.register(ConnectionKey.self) { _ in Connection() }
-        let request = Request(application: app)
+        let request = RequestScope(application: app)
         // Resolving through the request caches the singleton on the application.
         #expect(request.make(ConnectionKey.self) === app.make(ConnectionKey.self))
     }
 
     @Test
     func factoryResolvesDependencyGraph() {
-        let app = Application()
+        let app = AppScope()
         app.register(ConnectionKey.self) { _ in Connection() }
         app.register(RepoKey.self) { container in
             Repo(conn: container.make(ConnectionKey.self))
@@ -387,9 +387,9 @@ struct ContainerTests {
 
     @Test
     func requestTransientReusesApplicationSingletonDependency() {
-        let app = Application()
+        let app = AppScope()
         app.register(ConnectionKey.self) { _ in Connection() } // app singleton
-        let request = Request(application: app)
+        let request = RequestScope(application: app)
         request.register(RepoKey.self, scope: .transient) { container in
             Repo(conn: container.make(ConnectionKey.self))
         }
@@ -402,7 +402,7 @@ struct ContainerTests {
     @Test
     func applicationShutdownRunsHooks() {
         let counter = Counter()
-        let app = Application()
+        let app = AppScope()
         app.storage.set(IntKey.self, to: 1, onShutdown: { _ in counter.increment() })
         app.shutdown()
         #expect(counter.value == 1)
@@ -417,7 +417,7 @@ struct ContainerBridgeTests {
 
     @Test
     func dependencyResolvesContainerRegistration() {
-        let app = Application()
+        let app = AppScope()
         let registered = Connection()
         app.register(PoolKey.self) { _ in registered }
         let value = withDependencies { $0.container = app } operation: {
@@ -429,7 +429,7 @@ struct ContainerBridgeTests {
 
     @Test
     func overrideBeatsContainer() {
-        let app = Application()
+        let app = AppScope()
         app.register(PoolKey.self) { _ in Connection() }
         let override = Connection()
         let value = withDependencies {
@@ -443,7 +443,7 @@ struct ContainerBridgeTests {
 
     @Test
     func unregisteredKeyFallsBackToDefault() {
-        let app = Application()
+        let app = AppScope()
         let value = withDependencies { $0.container = app } operation: {
             DependencyValues.current[PoolKey.self]
         }
@@ -452,9 +452,9 @@ struct ContainerBridgeTests {
 
     @Test
     func requestBoundContainerSeesApplicationSingleton() {
-        let app = Application()
+        let app = AppScope()
         app.register(PoolKey.self) { _ in Connection() }
-        let request = Request(application: app)
+        let request = RequestScope(application: app)
         let value = withDependencies { $0.container = request } operation: {
             DependencyValues.current[PoolKey.self]
         }
@@ -463,7 +463,7 @@ struct ContainerBridgeTests {
 
     @Test
     func contextIgnoresInheritedContainer() {
-        let app = Application()
+        let app = AppScope()
         app.register(GreeterKey.self) { _ in NamedGreeter(name: "container") }
         let result = withDependencies { $0.container = app } operation: {
             withTestDependencies { Feature().run() }
@@ -473,7 +473,7 @@ struct ContainerBridgeTests {
 
     @Test
     func contextUsesContainerBoundInside() {
-        let app = Application()
+        let app = AppScope()
         app.register(GreeterKey.self) { _ in NamedGreeter(name: "container") }
         let result = withTestDependencies { $0.container = app } operation: { Feature().run() }
         #expect(result == "container")
@@ -481,7 +481,7 @@ struct ContainerBridgeTests {
 
     @Test
     func singletonFactoryDoesNotCaptureCallerOverrides() {
-        let app = Application()
+        let app = AppScope()
         app.register(RepoKey.self) { _ in
             Repo(conn: DependencyValues.current[PoolKey.self])
         }
@@ -494,7 +494,7 @@ struct ContainerBridgeTests {
 
     @Test
     func transientFactorySeesCallerOverrides() {
-        let app = Application()
+        let app = AppScope()
         app.register(RepoKey.self, scope: .transient) { _ in
             Repo(conn: DependencyValues.current[PoolKey.self])
         }
@@ -507,7 +507,7 @@ struct ContainerBridgeTests {
 }
 
 private final class ForwardingApplication: Container {
-    let storage = Storage()
+    let storage = ServiceStorage()
     let parent: (any Container)? = nil
     let marker = Connection()
 
@@ -534,7 +534,7 @@ struct ContainerDispatchTests {
     @Test
     func requestParentUsesCustomConformer() {
         final class Child: Container {
-            let storage = Storage()
+            let storage = ServiceStorage()
             let parent: (any Container)?
             init(parent: any Container) {
                 self.parent = parent
@@ -547,7 +547,7 @@ struct ContainerDispatchTests {
     @Test
     func recursiveSingletonTraps() async {
         await #expect(processExitsWith: .failure) {
-            let app = Application()
+            let app = AppScope()
             app.register(MarkerKey.self) { _ in DependencyValues.current[MarkerKey.self] }
             withDependencies { $0.container = app } operation: { _ = app.make(MarkerKey.self) }
         }
@@ -556,7 +556,7 @@ struct ContainerDispatchTests {
     @Test
     func recursiveTransientTraps() async {
         await #expect(processExitsWith: .failure) {
-            let app = Application()
+            let app = AppScope()
             app.register(MarkerKey.self, scope: .transient) { _ in DependencyValues.current[MarkerKey.self] }
             withDependencies { $0.container = app } operation: { _ = app.make(MarkerKey.self) }
         }

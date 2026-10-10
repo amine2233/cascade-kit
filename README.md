@@ -5,7 +5,7 @@ primitives and a simple dependency/DI registry useful for apps and libraries.
 
 Key features
 - `Lock`: a minimal mutex wrapper around `NSLock` for safe state mutation.
-- `Storage`: type-keyed, thread-safe storage with shutdown hooks.
+- `ServiceStorage`: type-keyed, thread-safe storage with shutdown hooks.
 - `DependencyKey` / `DependencyValues` / `@Dependency`: a simple dependency
   registry and property wrapper for resolving dependencies in different
   contexts (`live`, `preview`, `test`).

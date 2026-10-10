@@ -30,21 +30,21 @@ final class Lock<State>: @unchecked Sendable {
 }
 
 // =============================================================================
-// MARK: - Type-keyed Storage (the shared primitive)
+// MARK: - Type-keyed ServiceStorage (the shared primitive)
 
 // =============================================================================
 
 /// A marker protocol that binds a *key type* to a *value type*.
 ///
 /// Conforming types are never instantiated; they exist purely as compile-time
-/// keys whose identity (`ObjectIdentifier(Self.self)`) indexes `Storage`.
+/// keys whose identity (`ObjectIdentifier(Self.self)`) indexes `ServiceStorage`.
 public protocol StorageKey {
     /// The type of value stored under this key. Must be `Sendable` because
     /// stored values cross concurrency boundaries.
     associatedtype Value: Sendable
 }
 
-/// Type-erased box so a heterogeneous `Storage` can still run teardown logic.
+/// Type-erased box so a heterogeneous `ServiceStorage` can still run teardown logic.
 private protocol AnyStorageValue: Sendable {
     func shutdown()
 }
@@ -64,7 +64,7 @@ private struct StoredValue<T: Sendable>: AnyStorageValue {
 /// types match. It backs the Vapor-style `Container`. (The `@Dependency`
 /// registry uses a separate, *value-typed* store — see `DependencyValues` —
 /// because it needs copy semantics for scoped overriding.)
-public final class Storage: Sendable {
+public final class ServiceStorage: Sendable {
     private let items: Lock<[ObjectIdentifier: any AnyStorageValue]>
 
     public init() {
@@ -356,10 +356,10 @@ public func withTestDependencies<R>(
 // container with `withDependencies { $0.container = app }` and `@Dependency`
 // resolves its registrations through the same keys.
 
-/// A scope that owns a `Storage` and may delegate unresolved lookups upward.
+/// A scope that owns a `ServiceStorage` and may delegate unresolved lookups upward.
 public protocol Container: AnyObject, Sendable {
     /// This scope's storage (holds factories and cached singletons).
-    var storage: Storage { get }
+    var storage: ServiceStorage { get }
     /// The enclosing scope to fall back to (e.g. a request's application).
     var parent: (any Container)? { get }
     /// Resolves a registered service, or returns `nil`. A requirement (not just
@@ -480,8 +480,8 @@ extension Container {
 }
 
 /// Process-scoped container: singletons live for the lifetime of the app.
-public final class Application: Container {
-    public let storage = Storage()
+public final class AppScope: Container {
+    public let storage = ServiceStorage()
     public let parent: (any Container)? = nil
     public init() {}
 
@@ -493,10 +493,10 @@ public final class Application: Container {
 
 /// Request-scoped container: layers per-request state over the application,
 /// falling through to it for anything not registered locally.
-public final class Request: Container {
-    public let storage = Storage()
+public final class RequestScope: Container {
+    public let storage = ServiceStorage()
     public let parent: (any Container)?
-    public init(application: Application) {
+    public init(application: AppScope) {
         self.parent = application
     }
 }

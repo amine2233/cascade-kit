@@ -13,3 +13,4 @@ public
 *.p8
 /Examples/*/.build
 /Examples/*/.swiftpm
+mise.local.toml

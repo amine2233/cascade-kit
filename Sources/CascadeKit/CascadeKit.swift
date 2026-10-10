@@ -334,7 +334,24 @@ public func withDependencies<R>(
 ) async rethrows -> R {
     var values = DependencyValues.current
     mutate(&values)
-    return try await DependencyValues.$current.withValue(values, operation: operation, isolation: isolation)
+    return try await bind(values, isolation: isolation, operation: operation)
+}
+
+/// Binds `values` for the async `operation`, which keeps the caller's actor.
+/// Swift 6.4 deprecates the `isolation:` overload of `withValue` because its
+/// default already runs on the caller's context.
+private func bind<R>(
+    _ values: DependencyValues,
+    isolation: isolated (any Actor)?,
+    operation: () async throws -> R
+) async rethrows -> R {
+#if compiler(>=6.4)
+    try await DependencyValues.$current.withValue(values) {
+        try await operation()
+    }
+#else
+    try await DependencyValues.$current.withValue(values, operation: operation, isolation: isolation)
+#endif
 }
 
 /// Test-focused sugar: switches the context to `.test` (so unoverridden keys

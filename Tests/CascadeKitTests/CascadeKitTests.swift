@@ -122,7 +122,7 @@ struct StorageTests {
     func settingNilRemovesValue() {
         let storage = ServiceStorage()
         storage.set(IntKey.self, to: 1)
-        storage.set(IntKey.self, to: nil)
+        storage.removeValue(for: IntKey.self)
         #expect(storage.get(IntKey.self) == nil)
         #expect(storage.contains(IntKey.self) == false)
     }
@@ -142,7 +142,7 @@ struct StorageTests {
         let storage = ServiceStorage()
         storage.set(IntKey.self, to: 1, onShutdown: { _ in counter.increment() })
         #expect(counter.value == 0)
-        storage.set(IntKey.self, to: nil)
+        storage.removeValue(for: IntKey.self)
         #expect(counter.value == 1)
     }
 
@@ -362,7 +362,7 @@ struct ContainerTests {
     @Test
     func transientReturnsFreshInstances() {
         let app = AppScope()
-        app.register(ConnectionKey.self, scope: .transient) { _ in Connection() }
+        app.register(ConnectionKey.self, lifetime: .transient) { _ in Connection() }
         #expect(app.make(ConnectionKey.self) !== app.make(ConnectionKey.self))
     }
 
@@ -390,7 +390,7 @@ struct ContainerTests {
         let app = AppScope()
         app.register(ConnectionKey.self) { _ in Connection() } // app singleton
         let request = RequestScope(application: app)
-        request.register(RepoKey.self, scope: .transient) { container in
+        request.register(RepoKey.self, lifetime: .transient) { container in
             Repo(conn: container.make(ConnectionKey.self))
         }
         let r1 = request.make(RepoKey.self)
@@ -495,7 +495,7 @@ struct ContainerBridgeTests {
     @Test
     func transientFactorySeesCallerOverrides() {
         let app = AppScope()
-        app.register(RepoKey.self, scope: .transient) { _ in
+        app.register(RepoKey.self, lifetime: .transient) { _ in
             Repo(conn: DependencyValues.current[PoolKey.self])
         }
         let override = Connection()
@@ -557,7 +557,7 @@ struct ContainerDispatchTests {
     func recursiveTransientTraps() async {
         await #expect(processExitsWith: .failure) {
             let app = AppScope()
-            app.register(MarkerKey.self, scope: .transient) { _ in DependencyValues.current[MarkerKey.self] }
+            app.register(MarkerKey.self, lifetime: .transient) { _ in DependencyValues.current[MarkerKey.self] }
             withDependencies { $0.container = app } operation: { _ = app.make(MarkerKey.self) }
         }
     }
@@ -612,7 +612,7 @@ struct SingletonLifecycleTests {
         let closed = Counter()
         let app = AppScope()
         app
-            .register(PoolKey.self, scope: .transient, onShutdown: { _ in closed.increment() }) { _ in
+            .register(PoolKey.self, lifetime: .transient, onShutdown: { _ in closed.increment() }) { _ in
                 Connection()
             }
         _ = app.make(PoolKey.self)
@@ -771,5 +771,59 @@ struct DefaultCacheTests {
 private enum SelfReferencingKey: DependencyKey {
     static var liveValue: SpyService {
         DependencyValues.current[SelfReferencingKey.self]
+    }
+}
+
+@Suite
+struct PropagationTests {
+    private func overridden<R>(_ operation: () async -> R) async -> R {
+        await withTestDependencies {
+            $0.greeter = NamedGreeter(name: "override")
+        } operation: {
+            await operation()
+        }
+    }
+
+    @Test
+    func asyncLetChildInherits() async {
+        let result: String = await overridden {
+            async let child = Feature().run()
+            return await child
+        }
+        #expect(result == "override")
+    }
+
+    @Test
+    func taskGroupChildInherits() async {
+        let result: String = await overridden {
+            await withTaskGroup(of: String.self) { group in
+                group.addTask { Feature().run() }
+                return await group.reduce(into: "") { $0 += $1 }
+            }
+        }
+        #expect(result == "override")
+    }
+
+    @Test
+    func dispatchQueueDoesNotInherit() async {
+        let result: String = await overridden {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global().async {
+                    continuation.resume(returning: Feature().run())
+                }
+            }
+        }
+        #expect(result == "live")
+    }
+
+    @Test
+    func capturedValuesRestoreOverrideInDetachedTask() async {
+        let result: String = await overridden {
+            let values = DependencyValues.current
+            return await Task.detached {
+                DependencyValues.$current.withValue(values) { Feature().run() }
+            }.value
+        }
+        #expect(result == "override")
     }
 }

@@ -22,25 +22,6 @@ import CascadeKit
 
 ## Basic primitives
 
-### `Lock`
-A thin mutex wrapper around `NSLock` for protecting mutable state.
-
-```swift
-final class Counter {
-    private let lock = Lock(0)
-
-    func increment() {
-        lock.withLock { count in
-            count += 1
-        }
-    }
-
-    func value() -> Int {
-        lock.withLock { $0 }
-    }
-}
-```
-
 ### `ServiceStorage`
 Type-keyed thread-safe storage. Useful for storing singleton resources or
 ad-hoc values keyed by type.
@@ -106,6 +87,25 @@ app.register(DatabaseKey.self) { _ in
 }
 
 let db = app.make(DatabaseKey.self)
+```
+
+## Where overrides propagate
+`DependencyValues.current` is a task-local, so overrides follow the task tree.
+
+| API | Overrides propagate? |
+| --- | --- |
+| `async let`, child task, `TaskGroup` | Yes |
+| `Task { … }` | Yes |
+| `Task.detached { … }` | No |
+| `DispatchQueue.async`, callbacks | No |
+
+Where they do not propagate, capture the values and bind them again:
+
+```swift
+let values = DependencyValues.current
+Task.detached {
+    await DependencyValues.$current.withValue(values) { await effect() }
+}
 ```
 
 ## Building documentation locally

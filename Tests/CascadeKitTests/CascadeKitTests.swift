@@ -640,17 +640,15 @@ struct IsolationTests {
     @Test
     func mainActorCallerUsesNonSendableState() async {
         let box = MainActorBox()
-        var onMain: [Bool] = []
         await withDependencies { $0.greeter = NamedGreeter(name: "x") } operation: {
+            MainActor.preconditionIsolated()
             box.value += 1
-            onMain.append(Thread.isMainThread)
         }
         await withTestDependencies { $0.greeter = NamedGreeter(name: "y") } operation: {
+            MainActor.preconditionIsolated()
             box.value += 1
-            onMain.append(Thread.isMainThread)
         }
         #expect(box.value == 2)
-        #expect(onMain == [true, true])
     }
 
     @Test

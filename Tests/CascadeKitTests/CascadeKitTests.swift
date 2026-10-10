@@ -659,3 +659,36 @@ struct IsolationTests {
         #expect(result == "z")
     }
 }
+
+@Suite
+struct ResolveTests {
+    private enum PoolKey: StorageKey { typealias Value = Connection }
+
+    @Test
+    func resolveThrowsWhenNotRegistered() {
+        let app = AppScope()
+        #expect(throws: CascadeKitError.serviceNotRegistered(String(describing: PoolKey.self))) {
+            try app.resolve(PoolKey.self)
+        }
+    }
+
+    @Test
+    func resolveThrowsThroughRequestParent() {
+        let request = RequestScope(application: AppScope())
+        #expect(throws: CascadeKitError.self) { try request.resolve(PoolKey.self) }
+    }
+
+    @Test
+    func resolveReturnsRegisteredService() throws {
+        let app = AppScope()
+        app.register(PoolKey.self) { _ in Connection() }
+        #expect(try app.resolve(PoolKey.self) === app.make(PoolKey.self))
+    }
+
+    @Test
+    func makeStillTrapsWhenNotRegistered() async {
+        await #expect(processExitsWith: .failure) {
+            _ = AppScope().make(PoolKey.self)
+        }
+    }
+}

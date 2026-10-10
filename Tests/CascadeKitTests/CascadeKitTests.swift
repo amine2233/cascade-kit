@@ -505,3 +505,60 @@ struct ContainerBridgeTests {
         #expect(repo.conn === override)
     }
 }
+
+private final class ForwardingApplication: Container {
+    let storage = Storage()
+    let parent: (any Container)? = nil
+    let marker = Connection()
+
+    func resolveIfRegistered<K: StorageKey>(_ key: K.Type) -> K.Value? {
+        marker as? K.Value
+    }
+}
+
+@Suite
+struct ContainerDispatchTests {
+    private enum MarkerKey: DependencyKey {
+        static let liveValue = Connection()
+    }
+
+    @Test
+    func existentialCallReachesCustomConformer() {
+        let custom = ForwardingApplication()
+        let value = withDependencies { $0.container = custom } operation: {
+            DependencyValues.current[MarkerKey.self]
+        }
+        #expect(value === custom.marker)
+    }
+
+    @Test
+    func requestParentUsesCustomConformer() {
+        final class Child: Container {
+            let storage = Storage()
+            let parent: (any Container)?
+            init(parent: any Container) {
+                self.parent = parent
+            }
+        }
+        let custom = ForwardingApplication()
+        #expect(Child(parent: custom).resolveIfRegistered(MarkerKey.self) === custom.marker)
+    }
+
+    @Test
+    func recursiveSingletonTraps() async {
+        await #expect(processExitsWith: .failure) {
+            let app = Application()
+            app.register(MarkerKey.self) { _ in DependencyValues.current[MarkerKey.self] }
+            withDependencies { $0.container = app } operation: { _ = app.make(MarkerKey.self) }
+        }
+    }
+
+    @Test
+    func recursiveTransientTraps() async {
+        await #expect(processExitsWith: .failure) {
+            let app = Application()
+            app.register(MarkerKey.self, scope: .transient) { _ in DependencyValues.current[MarkerKey.self] }
+            withDependencies { $0.container = app } operation: { _ = app.make(MarkerKey.self) }
+        }
+    }
+}

@@ -362,6 +362,10 @@ public protocol Container: AnyObject, Sendable {
     var storage: Storage { get }
     /// The enclosing scope to fall back to (e.g. a request's application).
     var parent: (any Container)? { get }
+    /// Resolves a registered service, or returns `nil`. A requirement (not just
+    /// an extension method) so calls through `any Container` reach custom
+    /// conformers; the default implementation walks `storage` then `parent`.
+    func resolveIfRegistered<K: StorageKey>(_ key: K.Type) -> K.Value?
 }
 
 /// A lazy factory plus its lifetime scope.
@@ -377,7 +381,7 @@ public struct Factory<Service: Sendable>: Sendable {
     let build: @Sendable (any Container) -> Service
 }
 
-/// Two distinct generic specialisations give each `ServiceKey` two slots —
+/// Two distinct generic specialisations give each `StorageKey` two slots —
 /// one for its factory, one for its cached singleton — for free and type-safely.
 private struct FactoryKey<K: StorageKey>: StorageKey {
     typealias Value = Factory<K.Value>
@@ -385,6 +389,17 @@ private struct FactoryKey<K: StorageKey>: StorageKey {
 
 private struct CacheKey<K: StorageKey>: StorageKey {
     typealias Value = K.Value
+}
+
+private struct ResolutionID: Hashable {
+    let container: ObjectIdentifier
+    let key: ObjectIdentifier
+}
+
+/// The (container, key) factories currently running on this task, so a factory
+/// that resolves its own key fails fast instead of overflowing the stack.
+private enum ResolutionStack {
+    @TaskLocal static var active: Set<ResolutionID> = []
 }
 
 extension Container {
@@ -420,21 +435,38 @@ extension Container {
         if let factory = storage.get(FactoryKey<K>.self) {
             switch factory.scope {
             case .transient:
-                return factory.build(self)
+                return build(key, factory, values: DependencyValues.current)
             case .singleton:
                 if let cached = storage.get(CacheKey<K>.self) {
                     return cached
                 }
                 var root = DependencyValues()
                 root.container = self
-                let instance = DependencyValues.$current.withValue(root) {
-                    factory.build(self) // built without the lock
-                }
+                let instance = build(key, factory, values: root) // built without the lock
                 storage.set(CacheKey<K>.self, to: instance)
                 return instance
             }
         }
         return parent?.resolveIfRegistered(key)
+    }
+
+    /// Runs `factory` with `values` bound, trapping if this (container, key)
+    /// is already being built on the current task.
+    private func build<K: StorageKey>(
+        _ key: K.Type,
+        _ factory: Factory<K.Value>,
+        values: DependencyValues
+    ) -> K.Value {
+        let id = ResolutionID(container: ObjectIdentifier(self), key: ObjectIdentifier(key))
+        guard !ResolutionStack.active.contains(id) else {
+            fatalError("Recursive resolution of \(K.self).")
+        }
+
+        return ResolutionStack.$active.withValue(ResolutionStack.active.union([id])) {
+            DependencyValues.$current.withValue(values) {
+                factory.build(self)
+            }
+        }
     }
 
     /// Resolves a service, trapping when nothing is registered.

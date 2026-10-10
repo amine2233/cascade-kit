@@ -94,7 +94,7 @@ public final class ServiceStorage: Sendable {
         }
     }
 
-    /// Stores `value` under `key`, or removes it when `value` is `nil`.
+    /// Stores `value` under `key`, replacing any previous value.
     ///
     /// - Parameter onShutdown: Optional cleanup run when the value is removed
     ///   or when `shutdownAll()` is called (e.g. closing a connection pool).
@@ -103,17 +103,21 @@ public final class ServiceStorage: Sendable {
     /// the lock, so a closure that itself touches storage cannot deadlock.
     public func set<Key: StorageKey>(
         _ key: Key.Type,
-        to value: Key.Value?,
+        to value: Key.Value,
         onShutdown: (@Sendable (Key.Value) -> Void)? = nil
     ) {
-        let id = ObjectIdentifier(key)
+        replace(ObjectIdentifier(key), with: StoredValue(value: value, onShutdown: onShutdown))
+    }
+
+    /// Removes the value under `key`, running its shutdown hook if it has one.
+    public func removeValue<Key: StorageKey>(for key: Key.Type) {
+        replace(ObjectIdentifier(key), with: nil)
+    }
+
+    private func replace(_ id: ObjectIdentifier, with new: (any AnyStorageValue)?) {
         let evicted: (any AnyStorageValue)? = items.withLock { items in
             let previous = items[id]
-            if let value {
-                items[id] = StoredValue(value: value, onShutdown: onShutdown)
-            } else {
-                items[id] = nil
-            }
+            items[id] = new
             return previous
         }
         evicted?.shutdown()
@@ -429,16 +433,17 @@ public protocol Container: AnyObject, Sendable {
     func resolveIfRegistered<K: StorageKey>(_ key: K.Type) -> K.Value?
 }
 
-/// A lazy factory plus its lifetime scope.
-public struct Factory<Service: Sendable>: Sendable {
-    public enum Scope: Sendable {
-        /// One instance, built on first `make` and cached on the owning container.
-        case singleton
-        /// A fresh instance on every `make`.
-        case transient
-    }
+/// How long a service built by a `Factory` lives.
+public enum ServiceLifetime: Sendable {
+    /// One instance, built on first `make` and cached on the owning container.
+    case singleton
+    /// A fresh instance on every `make`.
+    case transient
+}
 
-    let scope: Scope
+/// A lazy factory plus its lifetime.
+public struct Factory<Service: Sendable>: Sendable {
+    let lifetime: ServiceLifetime
     let build: @Sendable (any Container) -> Service
     let onShutdown: (@Sendable (Service) -> Void)?
 }
@@ -494,11 +499,11 @@ extension Container {
     ///     }
     public func register<K: StorageKey>(
         _ key: K.Type,
-        scope: Factory<K.Value>.Scope = .singleton,
+        lifetime: ServiceLifetime = .singleton,
         onShutdown: (@Sendable (K.Value) -> Void)? = nil,
         _ build: @escaping @Sendable (any Container) -> K.Value
     ) {
-        storage.set(FactoryKey<K>.self, to: Factory(scope: scope, build: build, onShutdown: onShutdown))
+        storage.set(FactoryKey<K>.self, to: Factory(lifetime: lifetime, build: build, onShutdown: onShutdown))
     }
 
     /// Resolves a service if one is registered here or on a parent, running its
@@ -517,7 +522,7 @@ extension Container {
     ///   wait for the first build. Its `onShutdown` hook runs on `shutdown()`.
     public func resolveIfRegistered<K: StorageKey>(_ key: K.Type) -> K.Value? {
         if let factory = storage.get(FactoryKey<K>.self) {
-            switch factory.scope {
+            switch factory.lifetime {
             case .transient:
                 return build(key, factory, values: DependencyValues.current)
             case .singleton:

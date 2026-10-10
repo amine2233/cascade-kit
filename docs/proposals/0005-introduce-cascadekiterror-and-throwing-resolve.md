@@ -26,7 +26,7 @@ We propose a single `CascadeKitError` enum and a throwing `resolve(_:)` on `Cont
 
 ## Context and problem
 
-`make` calls `fatalError("No factory registered for …")` when no factory exists locally or in any parent (`CascadeKit.swift:424`). The crash cannot be tested, and a request handler cannot turn it into a 500 response. The module defines no Error type, while the project rule is one Error type per module.
+`make` calls `fatalError("No factory registered for …")` when no factory exists locally or in any parent (`CascadeKit.swift`). The crash cannot be tested, and a request handler cannot turn it into a 500 response. The module defines no Error type, while the project rule is one Error type per module.
 
 ## Goals and non-goals
 

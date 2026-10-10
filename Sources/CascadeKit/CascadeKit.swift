@@ -359,6 +359,12 @@ public func withTestDependencies<R>(
     }
 }
 
+/// The module's only error type.
+public enum CascadeKitError: Error, Sendable, Equatable {
+    /// No factory is registered for the named service key on the container or its parents.
+    case serviceNotRegistered(String)
+}
+
 // =============================================================================
 // MARK: - Optional: Vapor-style scoped container (make / register)
 
@@ -515,13 +521,24 @@ extension Container {
         }
     }
 
-    /// Resolves a service, trapping when nothing is registered.
-    public func make<K: StorageKey>(_ key: K.Type) -> K.Value {
+    /// Resolves a service, throwing ``CascadeKitError/serviceNotRegistered(_:)``
+    /// when nothing is registered here or on any parent.
+    public func resolve<K: StorageKey>(_ key: K.Type) throws -> K.Value {
         guard let value = resolveIfRegistered(key) else {
-            fatalError("No factory registered for \(K.self).")
+            throw CascadeKitError.serviceNotRegistered(String(describing: K.self))
         }
 
         return value
+    }
+
+    /// Resolves a service, trapping when nothing is registered. Use ``resolve(_:)``
+    /// to handle the failure instead.
+    public func make<K: StorageKey>(_ key: K.Type) -> K.Value {
+        do {
+            return try resolve(key)
+        } catch {
+            fatalError("No factory registered for \(K.self).")
+        }
     }
 }
 

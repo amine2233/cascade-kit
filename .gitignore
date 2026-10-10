@@ -11,3 +11,5 @@ out
 public
 *.log
 *.p8
+/Examples/*/.build
+/Examples/*/.swiftpm

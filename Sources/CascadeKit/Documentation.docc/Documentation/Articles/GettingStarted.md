@@ -1,124 +1,98 @@
 # Getting Started with CascadeKit
 
-CascadeKit provides a small collection of concurrency-safe primitives and a
-lightweight dependency registry for Swift apps and libraries.
+Add the package, declare a dependency, and override it in a test.
 
 ## Install
-Add the package to your `Package.swift`:
+
+Add the package to your `Package.swift` and depend on the `CascadeKit` product:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/amine2233/cascade-kit.git", from: "0.1.0"),
+    .package(url: "https://github.com/amine2233/cascade-kit.git", from: "2.0.0"),
 ],
+targets: [
+    .target(name: "MyApp", dependencies: ["CascadeKit"]),
+]
 ```
 
-Then add `CascadeKit` to your target dependencies.
+CascadeKit v2 requires iOS 18 or macOS 15 and Swift 6.
 
-## Import
+## Declare a dependency
 
-```swift
-import CascadeKit
-```
-
-## Basic primitives
-
-### `ServiceStorage`
-Type-keyed thread-safe storage. Useful for storing singleton resources or
-ad-hoc values keyed by type.
+A dependency has a key that supplies the values for each context and an accessor on ``DependencyValues``.
 
 ```swift
-struct DBKey: StorageKey { typealias Value = Database }
+protocol APIClient: Sendable {
+    func fetchItems() async throws -> [Item]
+}
 
-let storage = ServiceStorage()
-storage.set(DBKey.self, to: postgresDB)
-let db: Database? = storage.get(DBKey.self)
-```
-
-Shutdown hooks can be provided when registering values to cleanly close
-resources.
-
-## Dependency registry
-CascadeKit provides a small `DependencyKey` protocol and an `@Dependency`
-property wrapper for resolving values across contexts (`.live`, `.preview`,
-`.test`).
-
-### Define a dependency key
-
-```swift
 struct APIClientKey: DependencyKey {
-    static var liveValue: APIClient { RealAPIClient() }
-    static var testValue: APIClient { MockAPIClient() }
+    static let liveValue: any APIClient = APIClientLive()
+    static let testValue: any APIClient = APIClientUnimplemented()
 }
 
 extension DependencyValues {
-    var apiClient: APIClient { self[APIClientKey.self] }
+    var apiClient: any APIClient {
+        get { self[APIClientKey.self] }
+        set { self[APIClientKey.self] = newValue }
+    }
 }
 ```
 
-### Use via `@Dependency`
+`previewValue` defaults to `liveValue`, and so does `testValue` unless you provide one.
+
+## Use it
 
 ```swift
-struct Service {
-    @Dependency(\.apiClient) var apiClient: APIClient
+struct ItemsFeature {
+    @Dependency(\.apiClient) var apiClient
 
-    func fetch() async throws {
+    func load() async throws -> [Item] {
         try await apiClient.fetchItems()
     }
 }
 ```
 
-### Override in tests
+The value is resolved when it is read, so a feature created before an override still sees it.
+
+## Override it in a test
 
 ```swift
-await withTestDependencies {
-    $0.apiClient = MockAPIClient()
+@Test
+func loadsItems() async throws {
+    let items = try await withTestDependencies {
+        $0.apiClient = APIClientStub(items: [.sample])
+    } operation: {
+        try await ItemsFeature().load()
+    }
+    #expect(items == [.sample])
+}
+```
+
+`withTestDependencies` switches the context to `.test`, so every key you did not override uses its `testValue`.
+
+## Register services on a container
+
+For a composition root, register factories on an ``AppScope`` and bind it:
+
+```swift
+let app = AppScope()
+app.register(DatabaseKey.self, onShutdown: { $0.close() }) { _ in
+    PostgresDatabase(url: databaseURL)
+}
+
+try await withDependencies {
+    $0.container = app
 } operation: {
-    // code runs with the mock
+    try await run()
 }
+app.shutdown()
 ```
 
-## Container & Factory (optional)
-If you prefer a Vapor-style container with lazy factories and scoped singletons,
-use `Container` and `register`/`make` APIs.
+Anything registered on the container is now what `@Dependency(\.database)` returns.
 
-```swift
-app.register(DatabaseKey.self) { _ in
-    PostgresDatabase(url: dbURL)
-}
+## Next steps
 
-let db = app.make(DatabaseKey.self)
-```
-
-## Where overrides propagate
-`DependencyValues.current` is a task-local, so overrides follow the task tree.
-
-| API | Overrides propagate? |
-| --- | --- |
-| `async let`, child task, `TaskGroup` | Yes |
-| `Task { … }` | Yes |
-| `Task.detached { … }` | No |
-| `DispatchQueue.async`, callbacks | No |
-
-Where they do not propagate, capture the values and bind them again:
-
-```swift
-let values = DependencyValues.current
-Task.detached {
-    await DependencyValues.$current.withValue(values) { await effect() }
-}
-```
-
-## Building documentation locally
-This repository includes a `mise` task that runs DocC:
-
-```bash
-mise run build_documentations
-```
-
-Or preview a single doc catalog in Xcode by opening the package and
-choosing the `CascadeKit` scheme.
-
----
-
-For more examples and API details, see the module sources in
-`Sources/CascadeKit` and the unit tests in `Tests/CascadeKitTests`.
+- <doc:CompleteGuide> covers every feature and the resolution rules.
+- <doc:Examples> shows a command-line tool, Vapor, Hummingbird and an MCP server.
+- <doc:MigratingFromV1> lists every breaking change.

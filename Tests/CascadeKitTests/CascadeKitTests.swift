@@ -557,7 +557,10 @@ struct ContainerDispatchTests {
     func recursiveTransientTraps() async {
         await #expect(processExitsWith: .failure) {
             let app = AppScope()
-            app.register(MarkerKey.self, lifetime: .transient) { _ in DependencyValues.current[MarkerKey.self] }
+            app
+                .register(MarkerKey.self, lifetime: .transient) { _ in
+                    DependencyValues.current[MarkerKey.self]
+                }
             withDependencies { $0.container = app } operation: { _ = app.make(MarkerKey.self) }
         }
     }

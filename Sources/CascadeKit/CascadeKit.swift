@@ -141,7 +141,7 @@ public enum DependencyContext: Sendable, Hashable {
 /// and `previewValue` default to `liveValue` but can be specialised — e.g. point
 /// `testValue` at an unimplemented stub that fails the test if it is ever called
 /// unexpectedly.
-public protocol DependencyKey: Sendable {
+public protocol DependencyKey: StorageKey, Sendable {
     associatedtype Value: Sendable
     /// The value used in production (`.live` context). Built lazily, cached once.
     static var liveValue: Value { get }
@@ -174,7 +174,8 @@ private let _defaultCache = Lock<[DefaultCacheKey: any Sendable]>([:])
 ///
 /// Resolution order for a given key:
 ///   1. An explicit override stored via `withDependencies`.
-///   2. Otherwise the context default (`liveValue`/`previewValue`/`testValue`),
+///   2. A registration on the bound `container`, if any.
+///   3. Otherwise the context default (`liveValue`/`previewValue`/`testValue`),
 ///      cached once for `.live`/`.preview`, recomputed fresh for `.test`.
 public struct DependencyValues: Sendable {
     /// The values in effect for the current task. Bound by `withDependencies`.
@@ -182,6 +183,10 @@ public struct DependencyValues: Sendable {
 
     /// The fallback context for unoverridden keys. Defaults to `.live`.
     public var context: DependencyContext = .live
+
+    /// A container consulted for keys that are not overridden. Registrations on
+    /// it win over the context default.
+    public var container: (any Container)?
 
     /// Explicit overrides, keyed on the dependency key's metatype.
     private var storage: [ObjectIdentifier: any Sendable] = [:]
@@ -197,7 +202,10 @@ public struct DependencyValues: Sendable {
             if let override = storage[ObjectIdentifier(key)] as? K.Value {
                 return override
             }
-            // No override: fall back to the context default.
+            if let found = container?.resolveIfRegistered(key) {
+                return found
+            }
+            // Nothing registered: fall back to the context default.
             if context == .test {
                 // Tests get a fresh default each time (no cross-test caching).
                 return Self.makeDefault(key, context)
@@ -301,7 +309,8 @@ public func withDependencies<R>(
 }
 
 /// Test-focused sugar: switches the context to `.test` (so unoverridden keys
-/// resolve to their `testValue`), then applies any explicit overrides.
+/// resolve to their `testValue`), unbinds any inherited container, then applies
+/// any explicit overrides. Bind a container inside `mutate` to opt back in.
 ///
 ///     await withTestDependencies {
 ///         $0.apiClient = .mock(user: .stub)
@@ -315,6 +324,7 @@ public func withTestDependencies<R>(
 ) async rethrows -> R {
     try await withDependencies {
         $0.context = .test
+        $0.container = nil
         mutate(&$0)
     } operation: {
         try await operation()
@@ -329,6 +339,7 @@ public func withTestDependencies<R>(
 ) rethrows -> R {
     try withDependencies {
         $0.context = .test
+        $0.container = nil
         mutate(&$0)
     } operation: {
         try operation()
@@ -340,9 +351,10 @@ public func withTestDependencies<R>(
 
 // =============================================================================
 //
-// This layer is independent of `@Dependency`. Use it when you need lazy
-// factories with explicit singleton/transient scoping and an app→request
-// fallback hierarchy (e.g. server-side). It builds on the same `Storage`.
+// The explicit setup style. Use it when you need lazy factories with explicit
+// singleton/transient scoping and an app→request fallback hierarchy. Bind a
+// container with `withDependencies { $0.container = app }` and `@Dependency`
+// resolves its registrations through the same keys.
 
 /// A scope that owns a `Storage` and may delegate unresolved lookups upward.
 public protocol Container: AnyObject, Sendable {
@@ -350,11 +362,10 @@ public protocol Container: AnyObject, Sendable {
     var storage: Storage { get }
     /// The enclosing scope to fall back to (e.g. a request's application).
     var parent: (any Container)? { get }
-}
-
-/// A marker key binding a service key type to its value type.
-public protocol ServiceKey: Sendable {
-    associatedtype Value: Sendable
+    /// Resolves a registered service, or returns `nil`. A requirement (not just
+    /// an extension method) so calls through `any Container` reach custom
+    /// conformers; the default implementation walks `storage` then `parent`.
+    func resolveIfRegistered<K: StorageKey>(_ key: K.Type) -> K.Value?
 }
 
 /// A lazy factory plus its lifetime scope.
@@ -370,14 +381,25 @@ public struct Factory<Service: Sendable>: Sendable {
     let build: @Sendable (any Container) -> Service
 }
 
-/// Two distinct generic specialisations give each `ServiceKey` two slots —
+/// Two distinct generic specialisations give each `StorageKey` two slots —
 /// one for its factory, one for its cached singleton — for free and type-safely.
-private struct FactoryKey<K: ServiceKey>: StorageKey {
+private struct FactoryKey<K: StorageKey>: StorageKey {
     typealias Value = Factory<K.Value>
 }
 
-private struct CacheKey<K: ServiceKey>: StorageKey {
+private struct CacheKey<K: StorageKey>: StorageKey {
     typealias Value = K.Value
+}
+
+private struct ResolutionID: Hashable {
+    let container: ObjectIdentifier
+    let key: ObjectIdentifier
+}
+
+/// The (container, key) factories currently running on this task, so a factory
+/// that resolves its own key fails fast instead of overflowing the stack.
+private enum ResolutionStack {
+    @TaskLocal static var active: Set<ResolutionID> = []
 }
 
 extension Container {
@@ -387,7 +409,7 @@ extension Container {
     ///     app.register(UserRepoKey.self) { c in
     ///         SQLUserRepository(db: c.make(DatabaseKey.self))   // pulls a dep
     ///     }
-    public func register<K: ServiceKey>(
+    public func register<K: StorageKey>(
         _ key: K.Type,
         scope: Factory<K.Value>.Scope = .singleton,
         _ build: @escaping @Sendable (any Container) -> K.Value
@@ -395,33 +417,65 @@ extension Container {
         storage.set(FactoryKey<K>.self, to: Factory(scope: scope, build: build))
     }
 
-    /// Resolves a service, running its factory (and caching it, if a singleton).
+    /// Resolves a service if one is registered here or on a parent, running its
+    /// factory (and caching it, if a singleton). Returns `nil` otherwise.
     ///
     /// Resolution walks up to `parent` when the key is not registered locally,
     /// so a request resolves application-level singletons transparently.
+    ///
+    /// Singleton factories run under root `DependencyValues` (no overrides, this
+    /// container bound) so a caller's overrides are never captured in a cached
+    /// instance; transient factories see the caller's values.
     ///
     /// - Note: Factories run **outside** the storage lock, so a factory that
     ///   recursively `make`s its own dependencies cannot deadlock. The lazy
     ///   singleton cache uses a benign last-write-wins race under concurrent
     ///   first-touch; warm singletons up single-threaded at boot to avoid it.
-    public func make<K: ServiceKey>(_ key: K.Type) -> K.Value {
+    public func resolveIfRegistered<K: StorageKey>(_ key: K.Type) -> K.Value? {
         if let factory = storage.get(FactoryKey<K>.self) {
             switch factory.scope {
             case .transient:
-                return factory.build(self)
+                return build(key, factory, values: DependencyValues.current)
             case .singleton:
                 if let cached = storage.get(CacheKey<K>.self) {
                     return cached
                 }
-                let instance = factory.build(self) // built without the lock
+                var root = DependencyValues()
+                root.container = self
+                let instance = build(key, factory, values: root) // built without the lock
                 storage.set(CacheKey<K>.self, to: instance)
                 return instance
             }
         }
-        if let parent {
-            return parent.make(key)
+        return parent?.resolveIfRegistered(key)
+    }
+
+    /// Runs `factory` with `values` bound, trapping if this (container, key)
+    /// is already being built on the current task.
+    private func build<K: StorageKey>(
+        _ key: K.Type,
+        _ factory: Factory<K.Value>,
+        values: DependencyValues
+    ) -> K.Value {
+        let id = ResolutionID(container: ObjectIdentifier(self), key: ObjectIdentifier(key))
+        guard !ResolutionStack.active.contains(id) else {
+            fatalError("Recursive resolution of \(K.self).")
         }
-        fatalError("No factory registered for \(K.self).")
+
+        return ResolutionStack.$active.withValue(ResolutionStack.active.union([id])) {
+            DependencyValues.$current.withValue(values) {
+                factory.build(self)
+            }
+        }
+    }
+
+    /// Resolves a service, trapping when nothing is registered.
+    public func make<K: StorageKey>(_ key: K.Type) -> K.Value {
+        guard let value = resolveIfRegistered(key) else {
+            fatalError("No factory registered for \(K.self).")
+        }
+
+        return value
     }
 }
 

@@ -1,0 +1,17 @@
+{
+  "name": "cascade-kit",
+  "description": "Skill for creating and extending Swift projects with CascadeKit v2 dependency injection: apps, CLIs, Vapor, Hummingbird and MCP servers.",
+  "version": "2.0.0",
+  "author": {
+    "name": "amine2233"
+  },
+  "homepage": "https://github.com/amine2233/cascade-kit",
+  "repository": "https://github.com/amine2233/cascade-kit",
+  "keywords": [
+    "swift",
+    "dependency-injection",
+    "vapor",
+    "hummingbird",
+    "mcp"
+  ]
+}

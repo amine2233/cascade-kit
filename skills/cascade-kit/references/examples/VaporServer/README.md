@@ -7,7 +7,7 @@ Vapor owns `Application`/`Request`, so CascadeKit's containers are `AppScope`/`R
 - Handlers read `@Dependency(\.userRepository)`.
 
 ```sh
-cd Examples/VaporServer
+cd <your-project>
 swift run Run serve          # http://127.0.0.1:8080
 curl -X POST localhost:8080/users -H 'content-type: application/json' -d '{"name":"ada"}'
 curl localhost:8080/users/1

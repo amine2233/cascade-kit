@@ -5,7 +5,7 @@ let package = Package(
     name: "CascadeCLI",
     platforms: [.macOS(.v15)],
     dependencies: [
-        .package(path: "../.."),
+        .package(url: "https://github.com/amine2233/cascade-kit.git", from: "2.0.0"),
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0")
     ],
     targets: [

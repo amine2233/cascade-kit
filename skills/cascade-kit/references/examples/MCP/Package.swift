@@ -5,7 +5,7 @@ let package = Package(
     name: "NotesMCP",
     platforms: [.macOS(.v15)],
     dependencies: [
-        .package(path: "../.."),
+        .package(url: "https://github.com/amine2233/cascade-kit.git", from: "2.0.0"),
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.1")
     ],
     targets: [

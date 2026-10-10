@@ -2,27 +2,27 @@
 import PackageDescription
 
 let package = Package(
-    name: "HummingbirdExample",
+    name: "cascade-kit-vapor-example",
     platforms: [.macOS(.v15)],
     dependencies: [
-        .package(path: "../.."),
-        .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0")
+        .package(url: "https://github.com/amine2233/cascade-kit.git", from: "2.0.0"),
+        .package(url: "https://github.com/vapor/vapor.git", from: "4.100.0")
     ],
     targets: [
         .target(
-            name: "TodoApp",
+            name: "App",
             dependencies: [
                 .product(name: "CascadeKit", package: "cascade-kit"),
-                .product(name: "Hummingbird", package: "hummingbird")
+                .product(name: "Vapor", package: "vapor")
             ]
         ),
-        .executableTarget(name: "Run", dependencies: ["TodoApp"]),
+        .executableTarget(name: "Run", dependencies: ["App"]),
         .testTarget(
-            name: "TodoAppTests",
+            name: "AppTests",
             dependencies: [
-                "TodoApp",
+                "App",
                 .product(name: "CascadeKit", package: "cascade-kit"),
-                .product(name: "HummingbirdTesting", package: "hummingbird")
+                .product(name: "VaporTesting", package: "vapor")
             ]
         )
     ],

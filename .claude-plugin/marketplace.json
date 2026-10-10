@@ -1,0 +1,11 @@
+{
+  "name": "cascade-kit",
+  "owner": { "name": "amine2233" },
+  "plugins": [
+    {
+      "name": "cascade-kit",
+      "source": "./",
+      "description": "Create and extend Swift projects with CascadeKit v2 dependency injection."
+    }
+  ]
+}

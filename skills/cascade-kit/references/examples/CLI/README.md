@@ -3,7 +3,7 @@
 A thin `swift-argument-parser` executable (`cascade-cli`) over a testable `CLIKit` library.
 
 ```sh
-cd Examples/CLI
+cd <your-project>
 /usr/bin/swift run cascade-cli greet Ada
 /usr/bin/swift run cascade-cli status
 /usr/bin/swift test

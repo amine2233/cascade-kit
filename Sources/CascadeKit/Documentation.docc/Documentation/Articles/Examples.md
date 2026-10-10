@@ -4,7 +4,7 @@ Four runnable packages show CascadeKit in a command-line tool, two web servers a
 
 ## Overview
 
-Each example is in `Examples/` with its own `Package.swift` that depends on CascadeKit by path, so the library stays dependency free. Every one follows the same shape:
+Each example is in `skills/cascade-kit/references/examples/` with its own `Package.swift` that depends on the published package, so the library stays dependency free. They are also the reference templates of the `cascade-kit` agent skill. Every one follows the same shape:
 
 1. Declare services as ``DependencyKey`` values and expose them on ``DependencyValues``.
 2. Build an ``AppScope`` at the composition root and register the services that need a lifetime or a shutdown hook.
@@ -15,7 +15,7 @@ Run an example from its directory with `swift run` and test it with `swift test`
 
 ## Command-line tool
 
-`Examples/CLI` uses swift-argument-parser. The logic lives in a library target so it can be tested without parsing arguments.
+`references/examples/CLI` uses swift-argument-parser. The logic lives in a library target so it can be tested without parsing arguments.
 
 ```swift
 public struct Actions: Sendable {
@@ -43,7 +43,7 @@ struct Greet: AsyncParsableCommand {
 
 ## Vapor
 
-`Examples/VaporServer` shows why the container types are named ``AppScope`` and ``RequestScope``: Vapor already owns `Application` and `Request`. A middleware creates a request scope for each request and binds it, so handlers read `@Dependency` without touching the request.
+`references/examples/VaporServer` shows why the container types are named ``AppScope`` and ``RequestScope``: Vapor already owns `Application` and `Request`. A middleware creates a request scope for each request and binds it, so handlers read `@Dependency` without touching the request.
 
 ```swift
 struct RequestScopeMiddleware: AsyncMiddleware {
@@ -72,7 +72,7 @@ The application's singletons are visible through the request scope, and anything
 
 ## Hummingbird
 
-`Examples/HummingbirdTodo` uses the same middleware idea with Hummingbird 2's `RouterMiddleware`.
+`references/examples/HummingbirdTodo` uses the same middleware idea with Hummingbird 2's `RouterMiddleware`.
 
 ```swift
 struct RequestScopeMiddleware<Context: RequestContext>: RouterMiddleware {
@@ -109,7 +109,7 @@ appScope.shutdown()
 
 ## MCP server
 
-`Examples/MCP` is a stdio server built on the Swift MCP SDK with two tools, `add_note` and `list_notes`. The tool logic reads its store with `@Dependency`, so a test swaps in an in-memory store.
+`references/examples/MCP` is a stdio server built on the Swift MCP SDK with two tools, `add_note` and `list_notes`. The tool logic reads its store with `@Dependency`, so a test swaps in an in-memory store.
 
 ```swift
 public struct NoteTools: Sendable {

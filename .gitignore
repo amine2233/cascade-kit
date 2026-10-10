@@ -11,6 +11,6 @@ out
 public
 *.log
 *.p8
-/Examples/*/.build
-/Examples/*/.swiftpm
+/skills/*/references/examples/*/.build
+/skills/*/references/examples/*/.swiftpm
 mise.local.toml

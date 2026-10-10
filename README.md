@@ -50,14 +50,27 @@ await withTestDependencies {
 
 The DocC catalog is in `Sources/CascadeKit/Documentation.docc`: a getting started article, a complete guide, a v1 to v2 migration guide and the examples overview. Build it with `mise run build_documentations`.
 
-## Examples
+## Skill and examples
 
-Runnable packages in `Examples/`, each with its own `Package.swift` so the library stays dependency free:
+`skills/cascade-kit` is an agent skill that creates and extends projects with CascadeKit. Its `references/examples/` holds four runnable packages, each with its own `Package.swift` so the library stays dependency free:
 
-- `Examples/CLI`: swift-argument-parser command-line tool.
-- `Examples/VaporServer`: Vapor server with a request scope per request.
-- `Examples/HummingbirdTodo`: Hummingbird 2 server.
-- `Examples/MCP`: stdio MCP server built on the Swift MCP SDK.
+- `CLI`: swift-argument-parser command-line tool.
+- `VaporServer`: Vapor server with a request scope per request.
+- `HummingbirdTodo`: Hummingbird 2 server.
+- `MCP`: stdio MCP server built on the Swift MCP SDK.
+
+Install the skill with [skills.sh](https://skills.sh):
+
+```bash
+npx skills add amine2233/cascade-kit
+```
+
+or as a Claude Code plugin:
+
+```bash
+/plugin marketplace add amine2233/cascade-kit
+/plugin install cascade-kit@cascade-kit
+```
 
 ## Migrating from v1
 

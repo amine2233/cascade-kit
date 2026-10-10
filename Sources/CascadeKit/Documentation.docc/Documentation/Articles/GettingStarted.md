@@ -41,14 +41,14 @@ final class Counter {
 }
 ```
 
-### `Storage`
+### `ServiceStorage`
 Type-keyed thread-safe storage. Useful for storing singleton resources or
 ad-hoc values keyed by type.
 
 ```swift
 struct DBKey: StorageKey { typealias Value = Database }
 
-let storage = Storage()
+let storage = ServiceStorage()
 storage.set(DBKey.self, to: postgresDB)
 let db: Database? = storage.get(DBKey.self)
 ```
